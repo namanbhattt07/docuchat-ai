@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Generated data (keep folder structure with .gitkeep files)
+data/uploads/*
+!data/uploads/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/chroma/*
+!data/chroma/.gitkeep
+data/*.db
+
+# System / editor
+.DS_Store
+.vscode/
+*.log

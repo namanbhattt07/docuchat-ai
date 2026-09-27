@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import Chunk, Document
-from app.services.ollama import embed
+from app.services.ollama import OllamaUnavailable, embed, generate
 
 STOP_WORDS = {"a", "an", "and", "are", "about", "the", "of", "for", "in", "is", "it", "to", "was", "what", "which", "with", "this", "that"}
 
@@ -31,6 +31,34 @@ BROAD_QUERY_PATTERN = re.compile(
 
 def is_broad_query(question: str) -> bool:
     return bool(BROAD_QUERY_PATTERN.search(question))
+
+
+async def rewrite_standalone_question(history: str, question: str) -> str:
+    """Follow-ups like "what are its type" or "explain them in detail" carry
+    no retrievable signal on their own. Left as-is, retrieval matches
+    whatever is generically similar to the leftover words, hands the model
+    real-but-irrelevant passages, and it answers confidently from those --
+    which is what actually caused the "hallucinations" seen in testing, not
+    the model inventing facts. Resolving references against the prior turns
+    before searching fixes it at the source. Retrieval-only: the caller
+    still uses the user's literal question for generation and history.
+    """
+    prompt = (
+        f"{history}"
+        "Rewrite ONLY the follow-up question below as a fully standalone "
+        "question with every pronoun and reference resolved using the prior "
+        'conversation (e.g. "what are its type" -> "what are the types of '
+        'sensors"). If it is already standalone, return it unchanged. Reply '
+        "with ONLY the rewritten question -- no quotes, no explanation, no "
+        "prefix.\n\n"
+        f"FOLLOW-UP QUESTION: {question}"
+    )
+    try:
+        raw = await generate([{"role": "user", "content": prompt}], think=False)
+    except OllamaUnavailable:
+        return question
+    rewritten = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip().strip('"').strip()
+    return rewritten or question
 
 
 def terms(text: str) -> list[str]:

@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.db import get_db
 from app.models import Conversation, Message
 from app.services.ollama import OllamaUnavailable, generate
-from app.services.retrieval import is_broad_query, retrieve, retrieve_overview
+from app.services.retrieval import is_broad_query, retrieve, retrieve_overview, rewrite_standalone_question
 from app.services.vector_store import get_collection
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -98,29 +98,48 @@ async def ask(request: ChatRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(conversation)
 
-    broad = is_broad_query(request.question)
+    # Retrieval needs a self-contained query -- "what are its type" carries
+    # no signal about what "its" is. Generation still uses the user's literal
+    # wording below, so history stays faithful to what was actually typed.
+    retrieval_question = await rewrite_standalone_question(history, request.question) if history else request.question
+
+    broad = is_broad_query(retrieval_question)
     if broad:
         sources = retrieve_overview(db, request.document_ids or None)
         max_sources = settings.retrieval_overview_max_sources
     else:
-        sources = await retrieve(db, get_collection(), request.question, request.document_ids or None)
+        sources = await retrieve(db, get_collection(), retrieval_question, request.document_ids or None)
         max_sources = 3
 
     if not sources:
         raise HTTPException(status_code=400, detail="Upload a text-based PDF before asking a question.")
 
     context = "\n\n".join(f"SOURCE {i + 1} | {source['filename']} | page {source['page_number']}\n{source['content']}" for i, source in enumerate(sources))
+    follow_up_note = (
+        "This is a follow-up in an ongoing conversation. If the user is asking you to elaborate, go deeper, or "
+        "explain further, you must surface new information from the passages beyond what you already said -- do "
+        "not just repeat a prior answer verbatim.\n\n"
+        if history
+        else ""
+    )
     if broad:
         instructions = f"""The passages below are representative excerpts sampled evenly across the whole document, not just the single closest match to the question. Synthesize a coherent answer that draws on as many of them as are relevant. Return exactly one JSON object, with no prose outside it:
 {{"answer":"synthesized answer with numeric citation markers in square brackets, e.g. [1] -- never the word \"source\" inside the brackets","source_ids":[source-number,...]}}
 Cite every passage you actually drew on, up to {max_sources} source_ids. If none of the passages are usable, return {{"answer":"I couldn't find a supported answer in the selected document.","source_ids":[]}}."""
     else:
-        instructions = f"""Answer using ONLY the supplied passages. Do not infer missing facts. Select a source only when it directly supports the answer. Return exactly one JSON object, with no prose outside it:
-{{"answer":"short factual answer with numeric citation markers in square brackets, e.g. [1] -- never the word \"source\" inside the brackets","source_ids":[source-number]}}
+        instructions = f"""Answer using ONLY the supplied passages, but explain it naturally and clearly rather than just quoting fragments -- connect related details across the passages the way a good tutor would. Do not infer facts the passages don't support. Return exactly one JSON object, with no prose outside it:
+{{"answer":"clear, well-explained answer with numeric citation markers in square brackets, e.g. [1] -- never the word \"source\" inside the brackets","source_ids":[source-number]}}
 Use 1 to {max_sources} source_ids. If the passages do not directly answer the question, return {{"answer":"I couldn't find a supported answer in the selected document.","source_ids":[]}}."""
-    prompt = f"{history}{instructions}\n\nPASSAGES:\n{context}\n\nQUESTION: {request.question}"
+    prompt = f"{history}{follow_up_note}{instructions}\n\nPASSAGES:\n{context}\n\nQUESTION: {request.question}"
+    system_message = (
+        "You are DocuChat, a knowledgeable and friendly study partner helping the user understand their own "
+        "document. Explain things clearly and naturally, the way a good tutor would -- connect ideas across the "
+        "passages instead of just repeating bullet points verbatim. Stay strictly grounded in the supplied "
+        "passages: never state a fact they don't support, and cite every claim with a [n] marker. If the passages "
+        "genuinely don't cover the question, say so plainly instead of guessing."
+    )
     try:
-        raw_answer = await generate([{"role": "system", "content": "You are a strict evidence-grounded research assistant. Never use outside knowledge."}, {"role": "user", "content": prompt}])
+        raw_answer = await generate([{"role": "system", "content": system_message}, {"role": "user", "content": prompt}])
     except OllamaUnavailable as exc:
         raise HTTPException(status_code=503, detail="Start Ollama and pull the configured Qwen model before chatting.") from exc
     answer, used_source_ids = grounded_response(raw_answer, len(sources), max_sources)

@@ -1,9 +1,10 @@
 "use client";
 
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { askQuestion, Citation, deleteDocument, DocumentItem, getSystemStatus, listDocuments, uploadDocument } from "../lib/api";
 
 type Message = { role: "user" | "assistant"; content: string; citations?: Citation[] };
+type Theme = "light" | "dark";
 
 const SUGGESTED_PROMPTS = [
   "Give me a summary of this document",
@@ -11,8 +12,33 @@ const SUGGESTED_PROMPTS = [
   "What is the main idea of this document?",
 ];
 
+const TEXTAREA_MAX_HEIGHT = 130;
+
 function FormattedText({ text }: { text: string }) {
   return <>{text.split("\n").map((line, lineIndex) => <p key={lineIndex}>{line.split(/(\*\*[^*]+\*\*)/g).map((part, partIndex): ReactNode => part.startsWith("**") && part.endsWith("**") ? <strong key={partIndex}>{part.slice(2, -2)}</strong> : part)}</p>)}</>;
+}
+
+function AssistantMessage({ message }: { message: Message }) {
+  const [visibleChars, setVisibleChars] = useState(0);
+  const text = message.content;
+  useEffect(() => {
+    setVisibleChars(0);
+    if (!text) return;
+    const step = Math.max(1, Math.round(text.length / 40));
+    const id = setInterval(() => {
+      setVisibleChars(current => {
+        const next = current + step;
+        if (next >= text.length) { clearInterval(id); return text.length; }
+        return next;
+      });
+    }, 20);
+    return () => clearInterval(id);
+  }, [text]);
+  const revealed = visibleChars >= text.length;
+  return <div className="message-content">
+    <FormattedText text={text.slice(0, visibleChars)} />
+    {revealed && message.citations && message.citations.length > 0 && <section className="citations"><p className="evidence-label">EVIDENCE USED</p>{message.citations.map(cite => <details key={cite.index}><summary><b>[{cite.index}]</b> {cite.filename} <span>Page {cite.page_number}</span></summary><p>{cite.excerpt}</p></details>)}</section>}
+  </div>;
 }
 
 function statusLabel(doc: DocumentItem): string {
@@ -39,8 +65,25 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [ollamaReady, setOllamaReady] = useState<boolean | null>(null);
+  const [theme, setTheme] = useState<Theme>("light");
   const inputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const current = document.documentElement.getAttribute("data-theme");
+    if (current === "dark" || current === "light") setTheme(current);
+  }, []);
+
+  function toggleTheme() {
+    setTheme(current => {
+      const next: Theme = current === "dark" ? "light" : "dark";
+      try {
+        document.documentElement.setAttribute("data-theme", next);
+        localStorage.setItem("docuchat-theme", next);
+      } catch { /* private browsing or storage disabled -- theme still applies for this session */ }
+      return next;
+    });
+  }
 
   async function refresh() {
     try {
@@ -69,6 +112,7 @@ export default function Home() {
   async function handleAsk(event: FormEvent) {
     event.preventDefault(); if (!question.trim() || loading) return;
     const prompt = question.trim(); setQuestion(""); setError(""); setLoading(true);
+    if (composerRef.current) composerRef.current.style.height = "auto";
     setMessages(current => [...current, { role: "user", content: prompt }]);
     try {
       const result = await askQuestion(prompt, selected, conversationId);
@@ -77,6 +121,18 @@ export default function Home() {
     } catch (err) { setError(err instanceof Error ? err.message : "Could not answer that question."); }
     finally { setLoading(false); }
   }
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+  function handleComposerChange(event: ChangeEvent<HTMLTextAreaElement>) {
+    setQuestion(event.target.value);
+    const el = event.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
+  }
   function toggle(id: string) { setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]); }
   async function remove(id: string) { try { await deleteDocument(id); await refresh(); } catch (err) { setError(err instanceof Error ? err.message : "Could not remove document."); } }
   function newChat() { setMessages([]); setConversationId(undefined); setError(""); }
@@ -84,7 +140,14 @@ export default function Home() {
 
   return <main className="app-shell">
     <aside className="sidebar">
-      <div className="sidebar-top"><div className="brand"><span className="brand-orbit"><i>D</i></span><span>DocuChat <b>AI</b></span></div><button className="new-chat" onClick={newChat}><span>＋</span> New conversation</button></div>
+      <div className="sidebar-top">
+        <div className="brand">
+          <span className="brand-orbit"><i>D</i></span>
+          <span>DocuChat <b>AI</b></span>
+          <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>{theme === "dark" ? "☀" : "☾"}</button>
+        </div>
+        <button className="new-chat" onClick={newChat}><span>＋</span> New conversation</button>
+      </div>
       <div className="library-heading"><span>Your library</span><b>{documents.length}</b></div>
       <button className="upload-zone" onClick={() => inputRef.current?.click()} disabled={uploading}><span className="upload-symbol">↥</span><span><strong>{uploading ? "Uploading…" : "Add a document"}</strong><small>PDF · stored locally</small></span><i>＋</i></button>
       <input ref={inputRef} className="hidden" type="file" accept="application/pdf,.pdf" onChange={handleUpload} />
@@ -110,12 +173,15 @@ export default function Home() {
             {SUGGESTED_PROMPTS.map(prompt => <button type="button" key={prompt} onClick={() => selectPrompt(prompt)}><span>{prompt}</span><em>→</em></button>)}
           </div>
         </section>}
-        {messages.map((message, index) => <article className={`message ${message.role}`} key={index}><i>{message.role === "assistant" ? "✦" : "N"}</i><div className="message-content"><FormattedText text={message.content} />{message.citations && message.citations.length > 0 && <section className="citations"><p className="evidence-label">EVIDENCE USED</p>{message.citations.map(cite => <details key={cite.index}><summary><b>[{cite.index}]</b> {cite.filename} <span>Page {cite.page_number}</span></summary><p>{cite.excerpt}</p></details>)}</section>}</div></article>)}
+        {messages.map((message, index) => <article className={`message ${message.role}`} key={index}>
+          <i>{message.role === "assistant" ? "✦" : "N"}</i>
+          {message.role === "assistant" ? <AssistantMessage message={message} /> : <div className="message-content"><FormattedText text={message.content} /></div>}
+        </article>)}
         {loading && <article className="message assistant"><i>✦</i><div className="thinking"><span /><span /><span /> Searching your selected evidence</div></article>}
       </div>
       {error && <div className="error">{error}</div>}
-      <form className="composer" onSubmit={handleAsk}><span className="composer-spark">✦</span><textarea ref={composerRef} value={question} onChange={event => setQuestion(event.target.value)} placeholder={selected.length ? "Ask a question about selected documents…" : "Select a document, then ask a question…"} rows={1} /><button type="submit" disabled={!question.trim() || loading} aria-label="Send question">↑</button></form>
-      <small className="hint">Responses are generated locally. Sources shown below an answer are the only evidence it used.</small>
+      <form className="composer" onSubmit={handleAsk}><span className="composer-spark">✦</span><textarea ref={composerRef} value={question} onChange={handleComposerChange} onKeyDown={handleComposerKeyDown} placeholder={selected.length ? "Ask a question about selected documents…" : "Select a document, then ask a question…"} rows={1} /><button type="submit" disabled={!question.trim() || loading} aria-label="Send question">↑</button></form>
+      <small className="hint">Responses are generated locally. Sources shown below an answer are the only evidence it used. Enter to send · Shift+Enter for a new line.</small>
     </section>
   </main>;
 }

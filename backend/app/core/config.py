@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
 
     retrieval_top_k: int = 8
-    retrieval_candidate_pool: int = 24
+    # Widens the candidate search set only (pure vector/lexical scoring, no
+    # extra LLM calls) -- 24 was thin once documents run into the hundreds
+    # of pages and thousands of chunks. retrieval_top_k (the final context
+    # fed to the model) stays at 8 so generation latency doesn't grow.
+    retrieval_candidate_pool: int = 40
     retrieval_overview_max_sources: int = 10
 
     @property

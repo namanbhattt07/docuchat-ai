@@ -1,10 +1,14 @@
+import asyncio
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models import Chunk, Document
-from app.services.retrieval import is_broad_query, lexical_score, retrieve_overview
+from app.services.ollama import OllamaUnavailable
+import app.services.retrieval as retrieval_module
+from app.services.retrieval import is_broad_query, lexical_score, retrieve_overview, rewrite_standalone_question
 
 
 @pytest.fixture()
@@ -87,3 +91,42 @@ def test_retrieve_overview_respects_limit(db_session) -> None:
     sources = retrieve_overview(db_session, [document_id], limit=2)
 
     assert len(sources) == 2
+
+
+def test_rewrite_standalone_question_uses_generate(monkeypatch) -> None:
+    captured = {}
+
+    async def fake_generate(messages, **kwargs):
+        captured["messages"] = messages
+        captured["kwargs"] = kwargs
+        return "What are the types of sensors?"
+
+    monkeypatch.setattr(retrieval_module, "generate", fake_generate)
+
+    result = asyncio.run(rewrite_standalone_question("PRIOR CONVERSATION...\n\n", "what are its type"))
+
+    assert result == "What are the types of sensors?"
+    assert captured["kwargs"].get("think") is False
+    assert "what are its type" in captured["messages"][0]["content"]
+
+
+def test_rewrite_standalone_question_falls_back_when_ollama_is_down(monkeypatch) -> None:
+    async def failing_generate(messages, **kwargs):
+        raise OllamaUnavailable("down")
+
+    monkeypatch.setattr(retrieval_module, "generate", failing_generate)
+
+    result = asyncio.run(rewrite_standalone_question("history", "what are its type"))
+
+    assert result == "what are its type"
+
+
+def test_rewrite_standalone_question_strips_think_block(monkeypatch) -> None:
+    async def fake_generate(messages, **kwargs):
+        return "<think>reasoning about pronouns</think>What is the frequency band of bluetooth?"
+
+    monkeypatch.setattr(retrieval_module, "generate", fake_generate)
+
+    result = asyncio.run(rewrite_standalone_question("history", "and its frequency band?"))
+
+    assert result == "What is the frequency band of bluetooth?"

@@ -36,8 +36,10 @@ type MobileView = "library" | "document" | "chat";
 
 const SIDEBAR_MIN = 220;
 const SIDEBAR_MAX = 420;
+const SIDEBAR_DEFAULT = 292;
 const CHAT_MIN = 300;
 const CHAT_MAX = 520;
+const CHAT_DEFAULT = 380;
 
 function readStoredNumber(key: string, fallback: number): number {
   if (typeof window === "undefined") return fallback;
@@ -107,22 +109,36 @@ export default function Home() {
   const [figuresOpen, setFiguresOpen] = useState(false);
   const [pageInfos, setPageInfos] = useState<PageInfo[]>([]);
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStoredBool("docuchat-sidebar-collapsed", false));
-  const [chatCollapsed, setChatCollapsed] = useState(() => readStoredBool("docuchat-chat-collapsed", false));
-  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredNumber("docuchat-sidebar-width", 292));
-  const [chatWidth, setChatWidth] = useState(() => readStoredNumber("docuchat-chat-width", 380));
-  const [isPreviewVisible, setIsPreviewVisible] = useState(() => readStoredBool("docuchat-preview-visible", true));
+  // Layout preferences start at the defaults, which is all the server can know, and
+  // are restored from localStorage after mount (like the theme below). Reading them
+  // in the initial state made the first client render differ from the server's HTML
+  // whenever something non-default was saved -- a hydration mismatch.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [layoutRestored, setLayoutRestored] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("library");
 
   useEffect(() => {
     const current = document.documentElement.getAttribute("data-theme");
     if (current === "dark" || current === "light") setTheme(current);
   }, []);
-  useEffect(() => { writeStored("docuchat-sidebar-collapsed", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
-  useEffect(() => { writeStored("docuchat-chat-collapsed", chatCollapsed ? "1" : "0"); }, [chatCollapsed]);
-  useEffect(() => { writeStored("docuchat-sidebar-width", String(sidebarWidth)); }, [sidebarWidth]);
-  useEffect(() => { writeStored("docuchat-chat-width", String(chatWidth)); }, [chatWidth]);
-  useEffect(() => { writeStored("docuchat-preview-visible", isPreviewVisible ? "1" : "0"); }, [isPreviewVisible]);
+  useEffect(() => {
+    setSidebarCollapsed(readStoredBool("docuchat-sidebar-collapsed", false));
+    setChatCollapsed(readStoredBool("docuchat-chat-collapsed", false));
+    setSidebarWidth(readStoredNumber("docuchat-sidebar-width", SIDEBAR_DEFAULT));
+    setChatWidth(readStoredNumber("docuchat-chat-width", CHAT_DEFAULT));
+    setIsPreviewVisible(readStoredBool("docuchat-preview-visible", true));
+    setLayoutRestored(true);
+  }, []);
+  // Saving waits for the restore above, or the defaults would overwrite what was saved.
+  useEffect(() => { if (layoutRestored) writeStored("docuchat-sidebar-collapsed", sidebarCollapsed ? "1" : "0"); }, [layoutRestored, sidebarCollapsed]);
+  useEffect(() => { if (layoutRestored) writeStored("docuchat-chat-collapsed", chatCollapsed ? "1" : "0"); }, [layoutRestored, chatCollapsed]);
+  useEffect(() => { if (layoutRestored) writeStored("docuchat-sidebar-width", String(sidebarWidth)); }, [layoutRestored, sidebarWidth]);
+  useEffect(() => { if (layoutRestored) writeStored("docuchat-chat-width", String(chatWidth)); }, [layoutRestored, chatWidth]);
+  useEffect(() => { if (layoutRestored) writeStored("docuchat-preview-visible", isPreviewVisible ? "1" : "0"); }, [layoutRestored, isPreviewVisible]);
 
   function toggleTheme() {
     setTheme(current => {

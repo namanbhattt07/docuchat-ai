@@ -495,7 +495,10 @@ button:disabled { cursor: not-allowed; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex;
-  gap: 14px;
+  /* Wraps to a second row when the center pane is narrow (both side panels
+     open) rather than pushing search / download / fullscreen out of reach. */
+  flex-wrap: wrap;
+  gap: 6px 14px;
   justify-content: space-between;
   padding: 8px 14px;
 }
@@ -578,6 +581,11 @@ button:disabled { cursor: not-allowed; }
 .pdf-canvas-area { height: 100%; overflow: auto; padding: 24px 0 40px; }
 .pdf-page-wrap { background: #fff; border-radius: 4px; box-shadow: 0 20px 55px var(--page-shadow); margin: 0 auto; position: relative; }
 .pdf-page-wrap canvas { border-radius: 4px; display: block !important; }
+/* Continuous-scroll mode: every page is in one column. A page wider than the
+   viewer starts at the left edge and scrolls sideways (auto margins only centre
+   a page that fits), and pages the reader is nowhere near stay empty placeholders. */
+.pdf-scroll-column { display: flex; flex-direction: column; gap: 16px; }
+.pdf-scroll-page { flex: 0 0 auto; }
 .pdf-highlight {
   background: var(--highlight-fill);
   border: 1.5px solid var(--highlight-border);
@@ -925,6 +933,11 @@ button:disabled { cursor: not-allowed; }
 
 /* Collapsed chat rail */
 .chat-panel.is-collapsed { align-items: center; padding: 16px 8px; width: 60px; }
+
+/* In a collapsed rail the expand chevron is centred like everything else in it.
+   Its normal `margin-left: auto` (which right-aligns it in an open header) would
+   otherwise override the rail's centring and leave it off-axis from the icon below. */
+.sidebar.is-collapsed .collapse-toggle, .chat-panel.is-collapsed .collapse-toggle { height: 32px; margin: 0 0 10px; width: 32px; }
 
 /* ---------- Multi-document collections (Group 5) ---------- */
 

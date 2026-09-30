@@ -32,6 +32,12 @@ export function ZoomOutIcon({ size = 18, className }: IconProps) {
 export function FitWidthIcon({ size = 18, className }: IconProps) {
   return <svg {...base(size)} className={className}><rect x="4" y="6" width="16" height="12" rx="1.5" /><path d="M8 3v3M16 3v3M8 18v3M16 18v3" /></svg>;
 }
+export function PageSingleIcon({ size = 18, className }: IconProps) {
+  return <svg {...base(size)} className={className}><rect x="6" y="3.5" width="12" height="17" rx="1.8" /><path d="M9.5 9h5M9.5 12.5h5" /></svg>;
+}
+export function PageScrollIcon({ size = 18, className }: IconProps) {
+  return <svg {...base(size)} className={className}><rect x="6" y="2.5" width="12" height="8" rx="1.6" /><rect x="6" y="13.5" width="12" height="8" rx="1.6" /></svg>;
+}
 export function FullscreenIcon({ size = 18, className }: IconProps) {
   return <svg {...base(size)} className={className}><path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" /></svg>;
 }
